@@ -1,0 +1,10 @@
+mojo-eigen is a derived port of Eigen.
+
+Copyright 2026 Lee Penkman
+
+Eigen is a C++ template library for linear algebra:
+https://gitlab.com/libeigen/eigen
+
+The derived numerical kernels and this repository are distributed under the
+Mozilla Public License 2.0. Individual Eigen contributors retain copyright in
+the algorithms and source material from which these kernels were ported.

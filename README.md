@@ -106,17 +106,20 @@ x, info = result
 
 Measured with `pixi run bench` on an Intel Xeon E5-2697 v4 at 2.30 GHz,
 Linux 6.8.0-136-generic x86-64. These are real best-of-three wall times from
-the benchmark in this repository, run on 2026-07-29. Reference columns use
-NumPy for products, eigenpy/Eigen for decompositions, and SciPy for CG.
+the benchmark in this repository, run on 2026-08-24. Reference columns use
+NumPy for products, eigenpy/Eigen for decompositions, and SciPy for CG. The
+optional GPU rows compare the explicit GPU route with mojo-eigen's CPU route.
 
 | case | mojo-eigen | reference | reference / Mojo |
 | --- | ---: | ---: | ---: |
-| batched 3×3 matmul (250k) | 7.81 ms | NumPy 88.48 ms | 11.32× faster |
-| batched 4×4 matvec (150k) | 2.87 ms | NumPy 14.52 ms | 5.06× faster |
-| batched 4×4 LDLT solve (20k) | 5.78 ms | eigenpy 18.41 ms | 3.19× faster |
-| batched symmetric 4×4 eigh (20k) | 8.45 ms | eigenpy 67.95 ms | 8.04× faster |
-| batched Jacobi 3×3 SVD (20k) | 9.80 ms | eigenpy 78.35 ms | 8.00× faster |
-| CSR CG, 120×120 Poisson | 111.86 ms | SciPy 17,373.98 ms | 155.32× faster |
+| batched 3×3 matmul (250k) | 7.57 ms | NumPy 88.92 ms | 11.75× faster |
+| batched 4×4 matvec (150k) | 4.08 ms | NumPy 15.28 ms | 3.75× faster |
+| batched 4×4 LDLT solve (20k) | 7.34 ms | eigenpy 21.77 ms | 2.97× faster |
+| batched symmetric 4×4 eigh (20k) | 7.79 ms | eigenpy 58.25 ms | 7.48× faster |
+| batched Jacobi 3×3 SVD (20k) | 9.20 ms | eigenpy 63.90 ms | 6.95× faster |
+| batched symmetric 4×4 eigh GPU (20k) | 3.46 ms | Mojo CPU 7.30 ms | 2.11× faster |
+| batched Jacobi 3×3 SVD GPU (20k) | 3.69 ms | Mojo CPU 11.61 ms | 3.15× faster |
+| CSR CG, 120×120 Poisson | 73.58 ms | SciPy 7,923.03 ms | 107.68× faster |
 
 The decomposition batches remove repeated Python scratch allocation and FFI
 crossings, then parallelize independent matrices above the threshold. Timings

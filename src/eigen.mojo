@@ -1,8 +1,8 @@
 """Dense small-matrix and sparse iterative kernels derived from Eigen."""
 
-from std.algorithm import parallelize
+from max.algorithm import parallelize
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.math import abs, atan2, cos, sin, sqrt
 from std.sys import has_accelerator
 from std.sys.info import num_physical_cores, simd_width_of as simdwidthof
@@ -1141,18 +1141,19 @@ def gpu_eigh4_f64(
     eigenvectors: UnsafePointer[Float64, AnyOrigin[mut=True]],
     work: UnsafePointer[Float64, AnyOrigin[mut=True]],
     statuses: UnsafePointer[Int64, AnyOrigin[mut=True]],
-    n: Int,
-    batch: Int,
+    n: Int64,
+    batch: Int64,
 ):
     var item = Int(global_idx.x)
-    if item >= batch:
+    var n_int = Int(n)
+    if item >= Int(batch):
         return
     statuses[item] = Int64(
         1
         if tridiagonal_eigh4[DType.float64](
-            matrices + item * n * n,
-            eigenvalues + item * n,
-            eigenvectors + item * n * n,
+            matrices + item * n_int * n_int,
+            eigenvalues + item * n_int,
+            eigenvectors + item * n_int * n_int,
             work + item * 28,
         )
         else 0
@@ -1195,8 +1196,8 @@ def batch_selfadjoint_eigh_gpu_f64(
                 vectors_device,
                 work_device,
                 statuses_device,
-                n,
-                batch,
+                Int64(n),
+                Int64(batch),
                 grid_dim=(batch + block_size - 1) // block_size,
                 block_dim=block_size,
             )
@@ -1262,22 +1263,23 @@ def gpu_svd_f64(
     work: UnsafePointer[Float64, AnyOrigin[mut=True]],
     rotations: UnsafePointer[Float64, AnyOrigin[mut=True]],
     statuses: UnsafePointer[Int64, AnyOrigin[mut=True]],
-    n: Int,
-    batch: Int,
+    n: Int64,
+    batch: Int64,
 ):
     var item = Int(global_idx.x)
-    if item >= batch:
+    var n_int = Int(n)
+    if item >= Int(batch):
         return
     statuses[item] = Int64(
         1
         if jacobi_svd[DType.float64](
-            matrices + item * n * n,
-            singular_values + item * n,
-            matrices_u + item * n * n,
-            matrices_v + item * n * n,
-            work + item * n * n,
+            matrices + item * n_int * n_int,
+            singular_values + item * n_int,
+            matrices_u + item * n_int * n_int,
+            matrices_v + item * n_int * n_int,
+            work + item * n_int * n_int,
             rotations + item * 4,
-            n,
+            n_int,
         )
         else 0
     )
@@ -1326,8 +1328,8 @@ def batch_jacobi_svd_gpu_f64(
                 work_device,
                 rotations_device,
                 statuses_device,
-                n,
-                batch,
+                Int64(n),
+                Int64(batch),
                 grid_dim=(batch + block_size - 1) // block_size,
                 block_dim=block_size,
             )

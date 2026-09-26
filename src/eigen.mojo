@@ -1,15 +1,10 @@
 """Dense small-matrix and sparse iterative kernels derived from Eigen."""
 
-from max.algorithm import parallelize
-from std.gpu import global_idx
+from max.gpu import global_idx
 from max.gpu.host import DeviceContext
 from std.math import abs, atan2, cos, sin, sqrt
 from std.sys import has_accelerator
-from std.sys.info import num_physical_cores, simd_width_of as simdwidthof
-
-
-comptime PARALLEL_BATCH = 512
-comptime ITEMS_PER_WORKER = 256
+from std.sys.info import simd_width_of as simdwidthof
 
 
 def ptr[
@@ -1059,38 +1054,23 @@ def batch_ldlt_solve[
     pivots: UnsafePointer[Int64, AnyOrigin[mut=True]],
     statuses: UnsafePointer[Int64, AnyOrigin[mut=True]],
     n: Int,
-    batch: Int,
+    start: Int,
+    stop: Int,
 ):
-    var workers = 1
-    if batch >= PARALLEL_BATCH:
-        workers = min(
-            num_physical_cores(),
-            (batch + ITEMS_PER_WORKER - 1) // ITEMS_PER_WORKER,
-        )
-
-    @parameter
-    def process(worker: Int):
-        var start = worker * batch // workers
-        var end = (worker + 1) * batch // workers
-        for item in range(start, end):
-            statuses[item] = Int64(
-                1
-                if ldlt_solve[dtype](
-                    matrices + item * n * n,
-                    right_hand_sides + item * n,
-                    solutions + item * n,
-                    work + item * n * n,
-                    temporary + item * n,
-                    pivots + item * n,
-                    n,
-                )
-                else 0
+    for item in range(start, stop):
+        statuses[item] = Int64(
+            1
+            if ldlt_solve[dtype](
+                matrices + item * n * n,
+                right_hand_sides + item * n,
+                solutions + item * n,
+                work + item * n * n,
+                temporary + item * n,
+                pivots + item * n,
+                n,
             )
-
-    if workers > 1:
-        parallelize[process](workers, workers)
-    else:
-        process(0)
+            else 0
+        )
 
 
 def batch_selfadjoint_eigh[
@@ -1102,37 +1082,22 @@ def batch_selfadjoint_eigh[
     work: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
     statuses: UnsafePointer[Int64, AnyOrigin[mut=True]],
     n: Int,
-    batch: Int,
+    start: Int,
+    stop: Int,
 ):
     var workspace_size = 28 if n == 4 else 18
-    var workers = 1
-    if batch >= PARALLEL_BATCH:
-        workers = min(
-            num_physical_cores(),
-            (batch + ITEMS_PER_WORKER - 1) // ITEMS_PER_WORKER,
-        )
-
-    @parameter
-    def process(worker: Int):
-        var start = worker * batch // workers
-        var end = (worker + 1) * batch // workers
-        for item in range(start, end):
-            statuses[item] = Int64(
-                1
-                if selfadjoint_eigh[dtype](
-                    matrices + item * n * n,
-                    eigenvalues + item * n,
-                    eigenvectors + item * n * n,
-                    work + item * workspace_size,
-                    n,
-                )
-                else 0
+    for item in range(start, stop):
+        statuses[item] = Int64(
+            1
+            if selfadjoint_eigh[dtype](
+                matrices + item * n * n,
+                eigenvalues + item * n,
+                eigenvectors + item * n * n,
+                work + item * workspace_size,
+                n,
             )
-
-    if workers > 1:
-        parallelize[process](workers, workers)
-    else:
-        process(0)
+            else 0
+        )
 
 
 def gpu_eigh4_f64(
@@ -1221,38 +1186,23 @@ def batch_jacobi_svd[
     rotations: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
     statuses: UnsafePointer[Int64, AnyOrigin[mut=True]],
     n: Int,
-    batch: Int,
+    start: Int,
+    stop: Int,
 ):
-    var workers = 1
-    if batch >= PARALLEL_BATCH:
-        workers = min(
-            num_physical_cores(),
-            (batch + ITEMS_PER_WORKER - 1) // ITEMS_PER_WORKER,
-        )
-
-    @parameter
-    def process(worker: Int):
-        var start = worker * batch // workers
-        var end = (worker + 1) * batch // workers
-        for item in range(start, end):
-            statuses[item] = Int64(
-                1
-                if jacobi_svd[dtype](
-                    matrices + item * n * n,
-                    singular_values + item * n,
-                    matrices_u + item * n * n,
-                    matrices_v + item * n * n,
-                    work + item * n * n,
-                    rotations + item * 4,
-                    n,
-                )
-                else 0
+    for item in range(start, stop):
+        statuses[item] = Int64(
+            1
+            if jacobi_svd[dtype](
+                matrices + item * n * n,
+                singular_values + item * n,
+                matrices_u + item * n * n,
+                matrices_v + item * n * n,
+                work + item * n * n,
+                rotations + item * 4,
+                n,
             )
-
-    if workers > 1:
-        parallelize[process](workers, workers)
-    else:
-        process(0)
+            else 0
+        )
 
 
 def gpu_svd_f64(
@@ -1525,13 +1475,13 @@ def me_ldlt_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, n: In
 
 
 @export("me_ldlt_batch_f64")
-def me_ldlt_batch_f64(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_ldlt_solve[DType.float64](ptr[DType.float64](a), ptr[DType.float64](b), ptr[DType.float64](x), ptr[DType.float64](work), ptr[DType.float64](temp), iptr(pivots), iptr(statuses), n, batch)
+def me_ldlt_batch_f64(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_ldlt_solve[DType.float64](ptr[DType.float64](a), ptr[DType.float64](b), ptr[DType.float64](x), ptr[DType.float64](work), ptr[DType.float64](temp), iptr(pivots), iptr(statuses), n, start, stop)
 
 
 @export("me_ldlt_batch_f32")
-def me_ldlt_batch_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_ldlt_solve[DType.float32](ptr[DType.float32](a), ptr[DType.float32](b), ptr[DType.float32](x), ptr[DType.float32](work), ptr[DType.float32](temp), iptr(pivots), iptr(statuses), n, batch)
+def me_ldlt_batch_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_ldlt_solve[DType.float32](ptr[DType.float32](a), ptr[DType.float32](b), ptr[DType.float32](x), ptr[DType.float32](work), ptr[DType.float32](temp), iptr(pivots), iptr(statuses), n, start, stop)
 
 
 @export("me_qr_f64")
@@ -1555,13 +1505,13 @@ def me_eigh_f32(a: Int, values: Int, vectors: Int, work: Int, n: Int) abi("C") -
 
 
 @export("me_eigh_batch_f64")
-def me_eigh_batch_f64(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_selfadjoint_eigh[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](vectors), ptr[DType.float64](work), iptr(statuses), n, batch)
+def me_eigh_batch_f64(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_selfadjoint_eigh[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](vectors), ptr[DType.float64](work), iptr(statuses), n, start, stop)
 
 
 @export("me_eigh_batch_f32")
-def me_eigh_batch_f32(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_selfadjoint_eigh[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](vectors), ptr[DType.float32](work), iptr(statuses), n, batch)
+def me_eigh_batch_f32(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_selfadjoint_eigh[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](vectors), ptr[DType.float32](work), iptr(statuses), n, start, stop)
 
 
 @export("me_eigh_batch_gpu_f64")
@@ -1580,13 +1530,13 @@ def me_svd_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, n
 
 
 @export("me_svd_batch_f64")
-def me_svd_batch_f64(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_jacobi_svd[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](u), ptr[DType.float64](v), ptr[DType.float64](work), ptr[DType.float64](rotations), iptr(statuses), n, batch)
+def me_svd_batch_f64(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_jacobi_svd[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](u), ptr[DType.float64](v), ptr[DType.float64](work), ptr[DType.float64](rotations), iptr(statuses), n, start, stop)
 
 
 @export("me_svd_batch_f32")
-def me_svd_batch_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, batch: Int) abi("C"):
-    batch_jacobi_svd[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](u), ptr[DType.float32](v), ptr[DType.float32](work), ptr[DType.float32](rotations), iptr(statuses), n, batch)
+def me_svd_batch_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+    batch_jacobi_svd[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](u), ptr[DType.float32](v), ptr[DType.float32](work), ptr[DType.float32](rotations), iptr(statuses), n, start, stop)
 
 
 @export("me_svd_batch_gpu_f64")

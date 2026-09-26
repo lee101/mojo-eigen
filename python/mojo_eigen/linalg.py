@@ -1,7 +1,7 @@
 """Small dense linear algebra and sparse conjugate gradient."""
 
 from __future__ import annotations
-
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import math
 import operator
@@ -13,6 +13,33 @@ from ._lib import address, lib
 
 
 _GPU_HEADROOM = None
+
+_BATCH_PARALLEL_MIN = 512
+_ITEMS_PER_WORKER = 256
+_MAX_BATCH_WORKERS = 8
+
+
+def _batch_chunks(batch):
+    """Split an independent-item batch across worker threads.
+
+    Each item is a self-contained 3x3 or 4x4 dense factorization running out
+    of L1, so the batch is compute-bound and threads scale it. ctypes drops
+    the GIL for the foreign call, so this is real fan-out.
+    """
+    if batch < _BATCH_PARALLEL_MIN:
+        return 1
+    per_worker = -(-batch // _ITEMS_PER_WORKER)
+    return max(1, min(_MAX_BATCH_WORKERS, per_worker))
+
+
+def _run_batch(call, batch):
+    chunks = _batch_chunks(batch)
+    if chunks == 1:
+        call(0, batch)
+        return
+    bounds = [i * batch // chunks for i in range(chunks + 1)]
+    with ThreadPoolExecutor(max_workers=chunks) as pool:
+        list(pool.map(lambda c: call(bounds[c], bounds[c + 1]), range(chunks)))
 
 
 def _array(value, *, ndim=None):
@@ -142,9 +169,14 @@ def solve(a, b, method="lu"):
         temporary = np.empty_like(b)
         pivots = np.empty_like(b, dtype=np.int64)
         statuses = np.empty(batch, dtype=np.int64)
-        getattr(lib(), f"me_ldlt_batch_{suffix}")(
-            address(a), address(b), address(x), address(work),
-            address(temporary), address(pivots), address(statuses), n, batch,
+        batch_ldlt = getattr(lib(), f"me_ldlt_batch_{suffix}")
+        _run_batch(
+            lambda lo, hi: batch_ldlt(
+                address(a), address(b), address(x), address(work),
+                address(temporary), address(pivots), address(statuses), n,
+                lo, hi,
+            ),
+            batch,
         )
         if not np.all(statuses):
             raise np.linalg.LinAlgError("LDLT factorization failed")
@@ -243,9 +275,13 @@ def eigh(a, *, device="cpu"):
     work = np.empty(work_shape, dtype=a.dtype)
     if a.ndim == 3:
         statuses = np.empty(batch, dtype=np.int64)
-        getattr(lib(), f"me_eigh_batch_{_suffix(a)}")(
-            address(a), address(values), address(vectors), address(work),
-            address(statuses), n, batch,
+        batch_eigh = getattr(lib(), f"me_eigh_batch_{_suffix(a)}")
+        _run_batch(
+            lambda lo, hi: batch_eigh(
+                address(a), address(values), address(vectors), address(work),
+                address(statuses), n, lo, hi,
+            ),
+            batch,
         )
         if not np.all(statuses):
             raise np.linalg.LinAlgError("self-adjoint eigensolver did not converge")
@@ -292,9 +328,14 @@ def svd(a, *, device="cpu"):
     if a.ndim == 3:
         batch = a.shape[0]
         statuses = np.empty(batch, dtype=np.int64)
-        getattr(lib(), f"me_svd_batch_{_suffix(a)}")(
-            address(a), address(values), address(u), address(v),
-            address(work), address(rotations), address(statuses), n, batch,
+        batch_svd = getattr(lib(), f"me_svd_batch_{_suffix(a)}")
+        _run_batch(
+            lambda lo, hi: batch_svd(
+                address(a), address(values), address(u), address(v),
+                address(work), address(rotations), address(statuses), n,
+                lo, hi,
+            ),
+            batch,
         )
         if not np.all(statuses):
             raise np.linalg.LinAlgError("Jacobi SVD did not converge")

@@ -1,5 +1,6 @@
 """Dense small-matrix and sparse iterative kernels derived from Eigen."""
 
+from max.algorithm import parallelize
 from max.gpu import global_idx
 from max.gpu.host import DeviceContext
 from std.math import abs, atan2, cos, sin, sqrt
@@ -1283,6 +1284,106 @@ def batch_jacobi_svd[
         )
 
 
+# The three batched kernels above run serially over their [start, stop) range.
+# `batch_run` keeps that loop as the default and only hands the range to
+# `parallelize` (max.algorithm, the live path on this toolchain) once the caller
+# has measured that the batch is big enough to pay for a thread fan-out. The
+# workers take contiguous chunks and each item writes only its own slices, so
+# the result is bit-identical to the serial loop for any worker count.
+# `workers <= 1` takes the serial loop, which lets the benchmark measure both
+# paths from one binary.
+comptime BATCH_LDLT = 0
+comptime BATCH_EIGH = 1
+comptime BATCH_SVD = 2
+
+
+# Everything here crosses as Int addresses, including into the `parallelize`
+# worker: a worker that closes over `UnsafePointer` values miscompiled (silent
+# garbage or a segfault at teardown), so each worker rebuilds its own pointers.
+# Only Ints are captured.
+@always_inline
+def batch_chunk[
+    dtype: DType, kind: Int
+](
+    matrices_addr: Int,
+    first_addr: Int,
+    second_addr: Int,
+    third_addr: Int,
+    fourth_addr: Int,
+    fifth_addr: Int,
+    statuses_addr: Int,
+    n: Int,
+    start: Int,
+    stop: Int,
+):
+    comptime Ptr = UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]]
+    var matrices = Ptr(unsafe_from_address=matrices_addr)
+    var first = Ptr(unsafe_from_address=first_addr)
+    var second = Ptr(unsafe_from_address=second_addr)
+    var third = Ptr(unsafe_from_address=third_addr)
+    var statuses = UnsafePointer[Int64, AnyOrigin[mut=True]](
+        unsafe_from_address=statuses_addr
+    )
+    comptime if kind == BATCH_LDLT:
+        batch_ldlt_solve[dtype](
+            matrices, first, second, third, Ptr(unsafe_from_address=fourth_addr),
+            UnsafePointer[Int64, AnyOrigin[mut=True]](
+                unsafe_from_address=fifth_addr
+            ),
+            statuses, n, start, stop,
+        )
+    elif kind == BATCH_EIGH:
+        batch_selfadjoint_eigh[dtype](
+            matrices, first, second, third, statuses, n, start, stop
+        )
+    else:
+        batch_jacobi_svd[dtype](
+            matrices, first, second, third, Ptr(unsafe_from_address=fourth_addr),
+            Ptr(unsafe_from_address=fifth_addr), statuses, n, start, stop,
+        )
+
+
+def batch_run[
+    dtype: DType, kind: Int
+](
+    matrices: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    first: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    second: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    third: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    fourth: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    fifth: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    statuses_addr: Int,
+    n: Int,
+    start: Int,
+    stop: Int,
+    workers: Int,
+):
+    if stop <= start:
+        return
+    var chunks = min(workers, stop - start)
+    if chunks <= 1:
+        batch_chunk[dtype, kind](
+            Int(matrices), Int(first), Int(second), Int(third), Int(fourth),
+            Int(fifth), statuses_addr, n, start, stop,
+        )
+        return
+    var matrices_addr = Int(matrices)
+    var first_addr = Int(first)
+    var second_addr = Int(second)
+    var third_addr = Int(third)
+    var fourth_addr = Int(fourth)
+    var fifth_addr = Int(fifth)
+    var count = stop - start
+    def work(chunk: Int) {imm}:
+        var lo = start + chunk * count // chunks
+        var hi = start + (chunk + 1) * count // chunks
+        batch_chunk[dtype, kind](
+            matrices_addr, first_addr, second_addr, third_addr, fourth_addr,
+            fifth_addr, statuses_addr, n, lo, hi,
+        )
+    parallelize(work, chunks, chunks)
+
+
 def gpu_svd_f64(
     matrices: UnsafePointer[Float64, AnyOrigin[mut=True]],
     singular_values: UnsafePointer[Float64, AnyOrigin[mut=True]],
@@ -1553,13 +1654,23 @@ def me_ldlt_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, n: In
 
 
 @export("me_ldlt_batch_f64")
-def me_ldlt_batch_f64(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_ldlt_batch_f64(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_ldlt_solve[DType.float64](ptr[DType.float64](a), ptr[DType.float64](b), ptr[DType.float64](x), ptr[DType.float64](work), ptr[DType.float64](temp), iptr(pivots), iptr(statuses), n, start, stop)
 
 
+@export("me_ldlt_batch_f64_par")
+def me_ldlt_batch_f64_par(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float64, BATCH_LDLT](ptr[DType.float64](a), ptr[DType.float64](b), ptr[DType.float64](x), ptr[DType.float64](work), ptr[DType.float64](temp), ptr[DType.float64](pivots), statuses, n, start, stop, workers)
+
+
 @export("me_ldlt_batch_f32")
-def me_ldlt_batch_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_ldlt_batch_f32(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_ldlt_solve[DType.float32](ptr[DType.float32](a), ptr[DType.float32](b), ptr[DType.float32](x), ptr[DType.float32](work), ptr[DType.float32](temp), iptr(pivots), iptr(statuses), n, start, stop)
+
+
+@export("me_ldlt_batch_f32_par")
+def me_ldlt_batch_f32_par(a: Int, b: Int, x: Int, work: Int, temp: Int, pivots: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float32, BATCH_LDLT](ptr[DType.float32](a), ptr[DType.float32](b), ptr[DType.float32](x), ptr[DType.float32](work), ptr[DType.float32](temp), ptr[DType.float32](pivots), statuses, n, start, stop, workers)
 
 
 @export("me_qr_f64")
@@ -1583,13 +1694,23 @@ def me_eigh_f32(a: Int, values: Int, vectors: Int, work: Int, n: Int) abi("C") -
 
 
 @export("me_eigh_batch_f64")
-def me_eigh_batch_f64(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_eigh_batch_f64(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_selfadjoint_eigh[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](vectors), ptr[DType.float64](work), iptr(statuses), n, start, stop)
 
 
+@export("me_eigh_batch_f64_par")
+def me_eigh_batch_f64_par(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float64, BATCH_EIGH](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](work), ptr[DType.float64](vectors), ptr[DType.float64](work), ptr[DType.float64](work), statuses, n, start, stop, workers)
+
+
 @export("me_eigh_batch_f32")
-def me_eigh_batch_f32(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_eigh_batch_f32(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_selfadjoint_eigh[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](vectors), ptr[DType.float32](work), iptr(statuses), n, start, stop)
+
+
+@export("me_eigh_batch_f32_par")
+def me_eigh_batch_f32_par(a: Int, values: Int, vectors: Int, work: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float32, BATCH_EIGH](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](work), ptr[DType.float32](vectors), ptr[DType.float32](work), ptr[DType.float32](work), statuses, n, start, stop, workers)
 
 
 @export("me_eigh_batch_gpu_f64")
@@ -1608,13 +1729,23 @@ def me_svd_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, n
 
 
 @export("me_svd_batch_f64")
-def me_svd_batch_f64(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_svd_batch_f64(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_jacobi_svd[DType.float64](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](u), ptr[DType.float64](v), ptr[DType.float64](work), ptr[DType.float64](rotations), iptr(statuses), n, start, stop)
 
 
+@export("me_svd_batch_f64_par")
+def me_svd_batch_f64_par(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float64, BATCH_SVD](ptr[DType.float64](a), ptr[DType.float64](values), ptr[DType.float64](u), ptr[DType.float64](v), ptr[DType.float64](work), ptr[DType.float64](rotations), statuses, n, start, stop, workers)
+
+
 @export("me_svd_batch_f32")
-def me_svd_batch_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int) abi("C"):
+def me_svd_batch_f32(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
     batch_jacobi_svd[DType.float32](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](u), ptr[DType.float32](v), ptr[DType.float32](work), ptr[DType.float32](rotations), iptr(statuses), n, start, stop)
+
+
+@export("me_svd_batch_f32_par")
+def me_svd_batch_f32_par(a: Int, values: Int, u: Int, v: Int, work: Int, rotations: Int, statuses: Int, n: Int, start: Int, stop: Int, workers: Int) abi("C"):
+    batch_run[DType.float32, BATCH_SVD](ptr[DType.float32](a), ptr[DType.float32](values), ptr[DType.float32](u), ptr[DType.float32](v), ptr[DType.float32](work), ptr[DType.float32](rotations), statuses, n, start, stop, workers)
 
 
 @export("me_svd_batch_gpu_f64")

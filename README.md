@@ -110,20 +110,37 @@ the benchmark in this repository, run on 2026-08-24. Reference columns use
 NumPy for products, eigenpy/Eigen for decompositions, and SciPy for CG. The
 optional GPU rows compare the explicit GPU route with mojo-eigen's CPU route.
 
+The last unrolling pass re-measured every row on 2026-11-11 with the same
+machine and kernel version. Each column is the median of five separate
+`pixi run bench` processes (that benchmark keeps the best of three calls per
+process), so the two columns share one noise profile.
+
+| case | before | after | reference / Mojo (after) |
+| --- | ---: | ---: | ---: |
+| batched 3×3 matmul (250k) | 7.71 ms | 6.70 ms | NumPy 13.73× faster |
+| batched 4×4 matvec (150k) | 2.42 ms | 2.00 ms | NumPy 9.00× faster |
+| batched 4×4 LDLT solve (20k) | 2.51 ms | 2.23 ms | eigenpy 7.00× faster |
+| batched symmetric 4×4 eigh (20k) | 5.40 ms | 4.99 ms | eigenpy 13.04× faster |
+| batched Jacobi 3×3 SVD (20k) | 10.82 ms | 9.84 ms | eigenpy 5.12× faster |
+| CSR CG, 120×120 Poisson | 69.26 ms | 70.23 ms | SciPy 84.25× faster |
+
+The three decomposition rows call kernels this pass did not touch; they moved
+with the run-to-run noise of this machine (about ±5%), which is also the size
+of the CG difference. Reference columns are taken from the same five-process
+runs. The GPU rows below are unchanged from the 2026-08-24 run.
+
 | case | mojo-eigen | reference | reference / Mojo |
 | --- | ---: | ---: | ---: |
-| batched 3×3 matmul (250k) | 7.57 ms | NumPy 88.92 ms | 11.75× faster |
-| batched 4×4 matvec (150k) | 4.08 ms | NumPy 15.28 ms | 3.75× faster |
-| batched 4×4 LDLT solve (20k) | 7.34 ms | eigenpy 21.77 ms | 2.97× faster |
-| batched symmetric 4×4 eigh (20k) | 7.79 ms | eigenpy 58.25 ms | 7.48× faster |
-| batched Jacobi 3×3 SVD (20k) | 9.20 ms | eigenpy 63.90 ms | 6.95× faster |
 | batched symmetric 4×4 eigh GPU (20k) | 3.46 ms | Mojo CPU 7.30 ms | 2.11× faster |
 | batched Jacobi 3×3 SVD GPU (20k) | 3.69 ms | Mojo CPU 11.61 ms | 3.15× faster |
-| CSR CG, 120×120 Poisson | 73.58 ms | SciPy 7,923.03 ms | 107.68× faster |
 
 The decomposition batches remove repeated Python scratch allocation and FFI
 crossings, then parallelize independent matrices above the threshold. Timings
 are machine- and load-dependent; run `pixi run bench` for local results.
+
+matmul and matvec now combine each output element's products as a balanced
+tree instead of one running sum, so results can differ from the previous
+revision in the last bits. The test tolerances are unchanged.
 
 ## How it works
 

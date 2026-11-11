@@ -70,6 +70,36 @@ def simd_copy[
         i += 1
 
 
+# The dense entry points only accept 3x3 and 4x4 matrices, so the item pitch
+# and the inner trip counts are compile-time constants rather than recomputed
+# multiplies. Each output element keeps one straight-line floating-point chain:
+# a second accumulator cannot pay for itself when the chain is only 3 or 4 long
+# (measured with bench/microbench.py; it lost for both sizes).
+@always_inline
+def matmul_items[
+    dtype: DType, n: Int
+](
+    a: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    b: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    dst: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    batch: Int,
+):
+    comptime pitch = n * n
+    for item in range(batch):
+        var item_a = a + item * pitch
+        var item_b = b + item * pitch
+        var item_dst = dst + item * pitch
+        for i in range(n):
+            var a_row = item_a + i * n
+            for j in range(n):
+                var total = scalar[dtype](0.0)
+                var k = 0
+                while k < n:
+                    total += a_row[k] * item_b[k * n + j]
+                    k += 1
+                item_dst[i * n + j] = total
+
+
 # Eigen: Eigen/src/Core/products/GeneralMatrixMatrix.h general_matrix_matrix_product
 def matmul[
     dtype: DType
@@ -80,14 +110,44 @@ def matmul[
     n: Int,
     batch: Int,
 ):
+    if n == 3:
+        matmul_items[dtype, 3](a, b, dst, batch)
+    elif n == 4:
+        matmul_items[dtype, 4](a, b, dst, batch)
+
+
+# Each element is a sum of only n products, so instead of a single running sum
+# the terms are combined as a balanced tree: the 4x4 case names two partial
+# accumulators, which halves the dependent-add chain. Measured with
+# bench/microbench.py at the batched caller size: ~1.6x faster for 3x3 and
+# ~1.3x for 4x4. This changes the summation order, so results can differ from
+# the previous revision in the last bits.
+@always_inline
+def matvec_items[
+    dtype: DType, n: Int
+](
+    a: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    x: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    dst: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    batch: Int,
+):
+    comptime pitch = n * n
     for item in range(batch):
-        var base = item * n * n
+        var item_a = a + item * pitch
+        var item_x = x + item * n
+        var item_dst = dst + item * n
         for i in range(n):
-            for j in range(n):
-                var total = scalar[dtype](0.0)
-                for k in range(n):
-                    total += a[base + i * n + k] * b[base + k * n + j]
-                dst[base + i * n + j] = total
+            var row = item_a + i * n
+            if n == 3:
+                item_dst[i] = (
+                    row[0] * item_x[0]
+                    + row[1] * item_x[1]
+                    + row[2] * item_x[2]
+                )
+            else:
+                var low = row[0] * item_x[0] + row[1] * item_x[1]
+                var high = row[2] * item_x[2] + row[3] * item_x[3]
+                item_dst[i] = low + high
 
 
 # Eigen: Eigen/src/Core/GeneralProduct.h gemv_dense_selector
@@ -100,14 +160,10 @@ def matvec[
     n: Int,
     batch: Int,
 ):
-    for item in range(batch):
-        var matrix_base = item * n * n
-        var vector_base = item * n
-        for i in range(n):
-            var total = scalar[dtype](0.0)
-            for j in range(n):
-                total += a[matrix_base + i * n + j] * x[vector_base + j]
-            dst[vector_base + i] = total
+    if n == 3:
+        matvec_items[dtype, 3](a, x, dst, batch)
+    elif n == 4:
+        matvec_items[dtype, 4](a, x, dst, batch)
 
 
 # Eigen: Eigen/src/LU/PartialPivLU.h generic_partial_lu_impl::unblocked_lu

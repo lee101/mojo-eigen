@@ -69,6 +69,37 @@ while i < n:                           # scalar tail
 - `p.unsafe_load(i)` for a scalar load; `p.unsafe_offset(i)[]` also works.
 - Positional `p[i]` still compiles but warns; prefer `unsafe_load`.
 
+## 3b. Compile-time loop unrolling
+
+- **`@parameter for` does not exist on 1.2.0.dev2026092605.** Writing it is a
+  parse error, not a hint: `'for' statement does not support decorators; remove
+  the decorator`. `@parameter if` fails the same way. What does work is a plain
+  `while` against a comptime bound, or a flat expression; both were verified to
+  unroll:
+  ```mojo
+  @always_inline
+  def sq[W: Int](p: Pointer[Float64, MutUntrackedOrigin]) -> Float64:
+      var total = Float64(0.0)
+      var k = 0
+      while k < W:
+          total += p.unsafe_load(k) * p.unsafe_load(k)
+          k += 1
+      return total
+  ```
+- `p[i]` on a `Pointer` is a *warning* (`positional __getitem__ is deprecated,
+  use unsafe_offset=`), fine in a runtime loop; write `p.unsafe_load(i)` and
+  `p.unsafe_store(i, v)` once unrolling puts `i` under compiler scrutiny.
+- A flat expression (`p[0] * p[0] + p[1] * p[1] + ...`) is equivalent and is
+  often the clearest way to pin a summation order.
+- `comptime if` works and is shipped: `comptime if not has_accelerator():`.
+- Runtime `for` loops were NOT unrolled in the 2026-11 unrolling pass (mutable
+  loop variables prevent it); do not assume they are.
+- Parametric dispatch on a runtime `n` is a plain `if n == 3: f[3](...) elif
+  n == 4: f[4](...)` written out — see `matmul` in `src/eigen.mojo`. Two
+  mechanisms do NOT work: a function parameter typed
+  `AnyTrivialRegType` (`unknown declaration`), and passing a parametric
+  function as a parameter (`invalid call ... has type 'def sqn[n: Int]'`).
+
 ## 4. Parallelism — moved from `std` to `max`
 
 `parallelize` is NOT gone. It moved package. On 1.2.0:

@@ -1,0 +1,20 @@
+### LDLT: 20k distinct factorizations vs one factor reused 20k times
+mojo, 20k distinct:                      2.020 ms
+eigenpy, 20k construct+solve:           65.272 ms
+eigenpy (bench.py), 20k rhs re-solves:  21.166 ms
+eigenpy, one factored rhs reused:       22.139 ms
+mojo solution of distinct items correct: True
+
+### eigh: bench.py times 20000 constructions, not 20000 eigensolves
+mojo, 20k solves:                             4.804 ms
+eigenpy, 20k constructions (as benchmarked):   0.005 ms
+eigenpy, alternating construct+solve (20k):   76.776 ms
+
+### SVD: bench.py times 20000 constructions without asking for U/S/Vh
+mojo, 20k full SVDs:                          10.319 ms
+eigenpy, 20k construct only (as benchmarked):  68.495 ms
+eigenpy, 20k construct + singularValues():     62.508 ms
+
+### CG: same CSR system, same tolerance
+mojo iterations=360 relres=9.233e-09 info=0
+scipy converged=True relres=9.233e-09

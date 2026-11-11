@@ -1,0 +1,6 @@
+eigh4  gpu exit=0 {'ms': 5.010932916775346, 'err': 1.5543122344752192e-15, 'resid': 6.661338147750939e-16, 'same_all': True, 'exit': 0}
+eigh4  cpu exit=0 {'ms': 6.280421046540141, 'err': 1.5543122344752192e-15, 'resid': 6.661338147750939e-16, 'same_all': True, 'exit': 0}
+svd3   gpu exit=0 {'ms': 1.5693840105086565, 'err': 5.995204332975845e-15, 'resid': 1.9984014443252818e-15, 'same_all': True, 'exit': 0}
+svd3   cpu exit=0 {'ms': 7.987535907886922, 'err': 3.774758283725532e-15, 'resid': 1.7763568394002505e-15, 'same_all': True, 'exit': 0}
+eigh4 GPU/CPU speedup: 1.25x (5.01 ms vs 6.28 ms)
+svd3 GPU/CPU speedup: 5.09x (1.57 ms vs 7.99 ms)

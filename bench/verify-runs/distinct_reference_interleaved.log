@@ -1,0 +1,9 @@
+attempt 0 ldlt : mojo med    2.09 ms (1.72-7.79), numpy med    12.52 ms (11.58-12.67), numpy/mojo   6.00x
+attempt 0 eigh : mojo med    5.25 ms (4.54-5.74), numpy med    67.84 ms (67.56-68.08), numpy/mojo  12.93x
+attempt 0 svd  : mojo med   10.13 ms (9.50-10.15), numpy med    77.00 ms (76.94-78.13), numpy/mojo   7.60x
+attempt 1 ldlt : mojo med    1.86 ms (1.57-1.95), numpy med    11.83 ms (11.69-11.84), numpy/mojo   6.37x
+attempt 1 eigh : mojo med    5.49 ms (4.83-5.75), numpy med    67.82 ms (66.85-69.40), numpy/mojo  12.35x
+attempt 1 svd  : mojo med    9.33 ms (9.18-10.35), numpy med    78.60 ms (77.89-78.91), numpy/mojo   8.42x
+attempt 2 ldlt : mojo med    1.78 ms (1.61-1.88), numpy med    11.99 ms (11.99-12.10), numpy/mojo   6.75x
+attempt 2 eigh : mojo med    5.21 ms (4.71-5.34), numpy med    69.71 ms (68.81-70.68), numpy/mojo  13.39x
+attempt 2 svd  : mojo med   10.99 ms (10.95-12.80), numpy med    79.07 ms (78.05-85.53), numpy/mojo   7.20x

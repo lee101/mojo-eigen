@@ -1,0 +1,10 @@
+Machine: Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz; Linux-6.8.0-147-generic-x86_64-with-glibc2.39
+
+| case | mojo-eigen | reference | reference / Mojo |
+| --- | ---: | ---: | ---: |
+| batched 3x3 matmul (250k) | 6.84 ms | 87.19 ms | 12.75x faster |
+| batched 4x4 matvec (150k) | 1.61 ms | 14.72 ms | 9.15x faster |
+| batched 4x4 LDLT solve (20k) | 3.48 ms | 18.65 ms | 5.35x faster |
+| batched symmetric 4x4 eigh (20k) | 4.06 ms | 61.21 ms | 15.06x faster |
+| batched Jacobi 3x3 SVD (20k) | 9.06 ms | 58.16 ms | 6.42x faster |
+| CSR CG, 120x120 Poisson | 72.34 ms | 9229.85 ms | 127.59x faster |

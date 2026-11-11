@@ -1,0 +1,4 @@
+scipy result type: tuple
+mojo iterations=363 relative_error=9.588e-09 info=0
+scipy info=0 relres=9.588e-09
+max|x_mojo - x_scipy| = 8.171e-14

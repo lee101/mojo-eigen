@@ -1,0 +1,23 @@
+worst |mojo - eigenpy| as a multiple of the test tolerance
+(values well below 1 are inside tolerance; the value shown is already
+ divided by any multiplier the test applies, e.g. SVD x3)
+float32 eigh 3x3                   0.001
+float32 eigh 4x4                   0.002
+float32 solve ldlt 3x3             0.001
+float32 solve ldlt 4x4             0.004
+float32 solve llt 3x3              0.003
+float32 solve llt 4x4              0.006
+float32 solve lu 3x3               0.002
+float32 solve lu 4x4               0.004
+float32 svd 3x3 (x3 tol)           0.002
+float32 svd 4x4 (x3 tol)           0.005
+float64 eigh 3x3                   0.000
+float64 eigh 4x4                   0.000
+float64 solve ldlt 3x3             0.000
+float64 solve ldlt 4x4             0.000
+float64 solve llt 3x3              0.000
+float64 solve llt 4x4              0.000
+float64 solve lu 3x3               0.000
+float64 solve lu 4x4               0.000
+float64 svd 3x3 (x3 tol)           0.000
+float64 svd 4x4 (x3 tol)           0.000

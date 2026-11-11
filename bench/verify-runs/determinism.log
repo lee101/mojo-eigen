@@ -1,0 +1,3 @@
+eigh  20000-item batch bitwise-identical across 4 calls: True
+svd   20000-item batch bitwise-identical across 4 calls: True
+ldlt  20000-item batch bitwise-identical across 4 calls: True

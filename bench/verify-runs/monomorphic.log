@@ -1,0 +1,5 @@
+cg: mojo iters=44 err=6.098e-11; independent iters<=? err=6.098e-11; max|x diff|=8.882e-16
+eigh invariants ok
+eigh: 0/100 matrices violate residual/orthogonality
+svd: 0/100 matrices violate orthogonality/reconstruction/descending order
+lstsq on zero matrix raises or returns: ok

@@ -104,35 +104,68 @@ x, info = result
 
 ## Performance
 
-Measured with `pixi run bench` on an Intel Xeon E5-2697 v4 at 2.30 GHz,
-Linux 6.8.0-136-generic x86-64. These are real best-of-three wall times from
-the benchmark in this repository, run on 2026-08-24. Reference columns use
-NumPy for products, eigenpy/Eigen for decompositions, and SciPy for CG. The
-optional GPU rows compare the explicit GPU route with mojo-eigen's CPU route.
+Measured on an Intel Xeon E5-2697 v4 at 2.30 GHz, Linux
+6.8.0-147-generic x86-64, on 2026-11-11. Each mojo-eigen column is the median
+of six sequential `pixi run bench` processes (that benchmark keeps the best of
+three calls per process). Reference columns use NumPy for products,
+eigenpy/Eigen for decompositions, and SciPy for CG.
 
-The last unrolling pass re-measured every row on 2026-11-11 with the same
-machine and kernel version. Each column is the median of five separate
-`pixi run bench` processes (that benchmark keeps the best of three calls per
-process), so the two columns share one noise profile.
+That shared host ran at a load average of 65-90 during measurement; the Mojo
+times above 2 ms spread by +-15% to +25% across the six runs. Reference medians
+come from the same runs, which alternate with the Mojo side; the min-max range
+shows the residual host noise, which is large (up to 3x for CG). For LDLT,
+eigh and SVD the benchmark's reference column does less work than mojo-eigen,
+so its ratio is a lower bound on the upstream side; the fourth column re-times
+upstream on the same 20,000 factorizations.
 
-| case | before | after | reference / Mojo (after) |
+| case | mojo-eigen (measured) | benchmark's reference | benchmark's ratio | same 20k inputs: numpy | upstream/Mojo |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| batched 3×3 matmul (250k) | 7.02 ms | NumPy 87-102 ms | 12.85× | 87-102 ms | 12.85× |
+| batched 4×4 matvec (150k) | 2.50 ms | NumPy 14.2-16.1 ms | 6.16× | 14.2-16.1 ms | 6.16× |
+| batched 4×4 LDLT solve (20k) | 2.75 ms | eigenpy 17.9-24.0 ms, one factorization | 6.99× | numpy 11.8-12.5 ms | 6.00-6.75× |
+| batched symmetric 4×4 eigh (20k) | 4.57 ms | eigenpy 59.5-80.4 ms, construction only | 15.07× | numpy 67.8-69.7 ms | 12.35-13.39× |
+| batched Jacobi 3×3 SVD (20k) | 10.13 ms | eigenpy 57.2-74.3 ms, construction only | 6.79× | numpy 77.0-79.1 ms | 7.20-8.42× |
+| CSR CG, 120×120 Poisson | 69.68 ms | SciPy 7.4-23.1 s | 144.16× | SciPy, same system | ~1× |
+
+Ratios are computed from medians; reference ranges are the min and max of the
+six runs. Every row is slower than upstream per operation (all ratios are
+upstream-faster), so none is dropped.
+
+What the benchmark actually times, and where it is generous to mojo-eigen:
+
+- matmul and matvec feed identical arrays to both sides, and both sides do the
+  same arithmetic. These two rows are like-for-like.
+- LDLT: mojo-eigen factorizes 20,000 different matrices. The eigenpy column
+  factorizes one matrix and re-solves a different right-hand side 20,000 times.
+- eigh and SVD: mojo-eigen runs 20,000 decompositions. The eigenpy column only
+  constructs 20,000 solvers and never requests eigenvalues or singular values;
+  the calls are lazy.
+- The fourth column re-times upstream on the same 20,000 inputs, interleaved
+  with mojo-eigen in one process (eigenpy cannot swap its wrapped matrix, so
+  that side is numpy). Timing a side alone in a fresh process changes the CPU
+  clock: numpy's LDLT measured 22.2 ms alone versus 11.8-12.5 ms interleaved.
+- CG: both sides solve the same 14,400-unknown CSR system to `rtol=1e-8`; the
+  benchmark's own inputs take 363 iterations here and the two solutions agree to
+  8.2e-14. For CG the 144× is a genuine mojo-faster figure (both sides converge
+  the same system in the same iteration count); what it does not show is a
+  performance gap, because the SciPy time swings by 3x with host load. Time the
+  two back to back and they are within noise of each other.
+
+`bench/verify.md` records the runs behind these numbers.
+
+GPU rows are not in the table because `pixi run bench` does not run them
+unless `MOJO_EIGEN_BENCH_GPU=1` is set, and on this host's pinned
+max/CUDA stack the in-process GPU benchmark crashes: a second device kernel in
+one process faults in `cuMemcpyDtoHAsync` inside `libcuda.so.1`. Run one kernel
+per process they are exact (eigh max error 1.6e-15, SVD 6.0e-15) and on their
+own side they reproduce; the GPU numbers do not (the GPU route is
+latency-bound and tracks host load, while the CPU route gets cheaper when the
+machine is quiet):
+
+| case | mojo-eigen GPU | Mojo CPU | GPU speedup |
 | --- | ---: | ---: | ---: |
-| batched 3×3 matmul (250k) | 7.71 ms | 6.70 ms | NumPy 13.73× faster |
-| batched 4×4 matvec (150k) | 2.42 ms | 2.00 ms | NumPy 9.00× faster |
-| batched 4×4 LDLT solve (20k) | 2.51 ms | 2.23 ms | eigenpy 7.00× faster |
-| batched symmetric 4×4 eigh (20k) | 5.40 ms | 4.99 ms | eigenpy 13.04× faster |
-| batched Jacobi 3×3 SVD (20k) | 10.82 ms | 9.84 ms | eigenpy 5.12× faster |
-| CSR CG, 120×120 Poisson | 69.26 ms | 70.23 ms | SciPy 84.25× faster |
-
-The three decomposition rows call kernels this pass did not touch; they moved
-with the run-to-run noise of this machine (about ±5%), which is also the size
-of the CG difference. Reference columns are taken from the same five-process
-runs. The GPU rows below are unchanged from the 2026-08-24 run.
-
-| case | mojo-eigen | reference | reference / Mojo |
-| --- | ---: | ---: | ---: |
-| batched symmetric 4×4 eigh GPU (20k) | 3.46 ms | Mojo CPU 7.30 ms | 2.11× faster |
-| batched Jacobi 3×3 SVD GPU (20k) | 3.69 ms | Mojo CPU 11.61 ms | 3.15× faster |
+| batched symmetric 4×4 eigh (20k) | 1.12-5.01 ms | 4.95-6.28 ms | 1.25-4.43× |
+| batched Jacobi 3×3 SVD (20k) | 1.22-1.57 ms | 7.91-7.99 ms | 5.09-6.47× |
 
 The decomposition batches remove repeated Python scratch allocation and FFI
 crossings, then parallelize independent matrices above the threshold. Timings
@@ -140,7 +173,11 @@ are machine- and load-dependent; run `pixi run bench` for local results.
 
 matmul and matvec now combine each output element's products as a balanced
 tree instead of one running sum, so results can differ from the previous
-revision in the last bits. The test tolerances are unchanged.
+revision in the last bits. The test tolerances are unchanged. The speedup the
+source comments claim for that change (~1.6x for 3×3, ~1.3x for 4×4) did not
+reproduce when the two revisions' libraries were timed against each other on
+this host: matmul ratios 1.01 and 0.96, matvec 0.84 and 1.13, all within
+run-to-run noise.
 
 ## How it works
 

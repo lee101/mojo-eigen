@@ -1,0 +1,6 @@
+ldlt  mojo 20k distinct             5.499 ms
+ldlt  numpy 20k distinct           22.229 ms
+eigh  mojo 20k distinct            20.854 ms
+eigh  numpy 20k distinct          117.230 ms
+svd   mojo 20k distinct            32.281 ms
+svd   numpy 20k distinct          193.444 ms

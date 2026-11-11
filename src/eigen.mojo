@@ -63,7 +63,7 @@ def simd_copy[
     comptime W = simdwidthof[dtype]()
     var i = 0
     while i + W <= count:
-        destination.store(i, source.load[width=W](i))
+        destination.store(i, source.unsafe_load[width=W](i))
         i += W
     while i < count:
         destination[i] = source[i]
@@ -377,8 +377,8 @@ def apply_left[
     comptime W = simdwidthof[dtype]()
     var j = 0
     while j + W <= n:
-        var x = matrix.load[width=W](p * n + j)
-        var y = matrix.load[width=W](q * n + j)
+        var x = matrix.unsafe_load[width=W](p * n + j)
+        var y = matrix.unsafe_load[width=W](q * n + j)
         matrix.store(p * n + j, c * x + s * y)
         matrix.store(q * n + j, -s * x + c * y)
         j += W
@@ -484,7 +484,7 @@ def jacobi_svd[
     comptime W = simdwidthof[dtype]()
     var i = 0
     while i + W <= n * n:
-        work.store(i, matrix.load[width=W](i) / scale)
+        work.store(i, matrix.unsafe_load[width=W](i) / scale)
         matrix_u.store(i, SIMD[dtype, W](0.0))
         matrix_v.store(i, SIMD[dtype, W](0.0))
         i += W

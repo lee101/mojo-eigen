@@ -464,6 +464,31 @@ def apply_right[
         matrix[i * n + q] = s * x + c * y
 
 
+# The Jacobi sweep applies the same right rotation to the work matrix and to V.
+# Both are n x n, so one pass over the rows updates the shared (c, s) in each.
+@always_inline
+def apply_right_pair[
+    dtype: DType
+](
+    x: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    y: UnsafePointer[Scalar[dtype], AnyOrigin[mut=True]],
+    n: Int,
+    p: Int,
+    q: Int,
+    c: Scalar[dtype],
+    s: Scalar[dtype],
+):
+    for i in range(n):
+        var xp = x[i * n + p]
+        var xq = x[i * n + q]
+        x[i * n + p] = c * xp - s * xq
+        x[i * n + q] = s * xp + c * xq
+        var yp = y[i * n + p]
+        var yq = y[i * n + q]
+        y[i * n + p] = c * yp - s * yq
+        y[i * n + q] = s * yp + c * yq
+
+
 # Eigen: Eigen/src/Jacobi/Jacobi.h real_2x2_jacobi_svd
 def svd_rotation[
     dtype: DType
@@ -576,11 +601,8 @@ def jacobi_svd[
                     apply_right[dtype](
                         matrix_u, n, p, q, left_c, -left_s
                     )
-                    apply_right[dtype](
-                        work, n, p, q, right_c, right_s
-                    )
-                    apply_right[dtype](
-                        matrix_v, n, p, q, right_c, right_s
+                    apply_right_pair[dtype](
+                        work, matrix_v, n, p, q, right_c, right_s
                     )
                     max_diagonal = max(
                         max_diagonal,
